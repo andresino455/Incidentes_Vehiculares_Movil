@@ -31,9 +31,14 @@ android {
     buildTypes {
         release {
             signingConfig = signingConfigs.getByName("debug")
+            isMinifyEnabled = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
         }
     }
-}
+}  // ← esta llave faltaba
 
 flutter {
     source = "../.."
@@ -41,6 +46,7 @@ flutter {
 
 dependencies {
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
+    implementation("com.google.android.material:material:1.12.0")
 }
 
 apply(plugin = "com.google.gms.google-services")

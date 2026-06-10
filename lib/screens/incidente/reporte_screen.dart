@@ -7,9 +7,11 @@ import 'package:latlong2/latlong.dart';
 import 'package:flutter_sound/flutter_sound.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
+import 'dart:convert';
 import '../../services/incidente_service.dart';
 import '../../services/vehiculo_service.dart';
-import 'package:connectivity_plus/connectivity_plus.dart';
 import '../../services/offline_service.dart';
 
 class ReporteScreen extends StatefulWidget {
@@ -32,6 +34,8 @@ class _ReporteScreenState extends State<ReporteScreen> {
   bool obtenendoUbicacion = false;
   String error = '';
   String exito = '';
+  bool _sinConexion = false;
+  bool _ubicacionCacheada = false;
 
   // Audio
   final FlutterSoundRecorder _recorder = FlutterSoundRecorder();
@@ -66,12 +70,43 @@ class _ReporteScreenState extends State<ReporteScreen> {
   }
 
   Future<void> _cargarVehiculos() async {
-    final data = await VehiculoService.getMisVehiculos();
-    setState(() => vehiculos = data);
+    final conectado = await OfflineService.hayConexion();
+    final prefs = await SharedPreferences.getInstance();
+
+    if (conectado) {
+      try {
+        final data = await VehiculoService.getMisVehiculos();
+        // Guardar en caché
+        await prefs.setString('vehiculos_cache', jsonEncode(data));
+        setState(() {
+          vehiculos = data;
+          _sinConexion = false;
+        });
+        return;
+      } catch (_) {}
+    }
+
+    // Sin conexión o error: cargar del caché
+    final cache = prefs.getString('vehiculos_cache');
+    if (cache != null) {
+      setState(() {
+        vehiculos = jsonDecode(cache);
+        _sinConexion = !conectado;
+      });
+    } else {
+      setState(() {
+        _sinConexion = !conectado;
+        error = conectado
+            ? 'Error al cargar vehículos'
+            : 'Sin conexión y sin datos en caché. Abrí la app con internet al menos una vez.';
+      });
+    }
   }
 
   Future<void> _obtenerUbicacion() async {
     setState(() => obtenendoUbicacion = true);
+    final prefs = await SharedPreferences.getInstance();
+
     try {
       LocationPermission permiso = await Geolocator.checkPermission();
       if (permiso == LocationPermission.denied) {
@@ -86,19 +121,50 @@ class _ReporteScreenState extends State<ReporteScreen> {
       }
       final pos = await Geolocator.getCurrentPosition(
         desiredAccuracy: LocationAccuracy.high,
-      );
+      ).timeout(const Duration(seconds: 10));
+
+      // Guardar última ubicación conocida
+      await prefs.setDouble('ultima_lat', pos.latitude);
+      await prefs.setDouble('ultima_lng', pos.longitude);
+
       setState(() {
         ubicacion = pos;
         obtenendoUbicacion = false;
+        _ubicacionCacheada = false;
       });
       try {
         _mapController.move(LatLng(pos.latitude, pos.longitude), 15);
       } catch (_) {}
     } catch (e) {
-      setState(() {
-        error = 'No se pudo obtener la ubicación';
-        obtenendoUbicacion = false;
-      });
+      // Sin GPS: usar última ubicación conocida
+      final lat = prefs.getDouble('ultima_lat');
+      final lng = prefs.getDouble('ultima_lng');
+      if (lat != null && lng != null) {
+        setState(() {
+          ubicacion = Position(
+            latitude: lat,
+            longitude: lng,
+            timestamp: DateTime.now(),
+            accuracy: 0,
+            altitude: 0,
+            altitudeAccuracy: 0,
+            heading: 0,
+            headingAccuracy: 0,
+            speed: 0,
+            speedAccuracy: 0,
+          );
+          _ubicacionCacheada = true;
+          obtenendoUbicacion = false;
+        });
+        try {
+          _mapController.move(LatLng(lat, lng), 15);
+        } catch (_) {}
+      } else {
+        setState(() {
+          error = 'No se pudo obtener la ubicación';
+          obtenendoUbicacion = false;
+        });
+      }
     }
   }
 
@@ -112,10 +178,7 @@ class _ReporteScreenState extends State<ReporteScreen> {
       final ruta =
           '${dir.path}/audio_${DateTime.now().millisecondsSinceEpoch}.m4a';
 
-      await _recorder.startRecorder(
-        toFile: ruta,
-        codec: Codec.aacMP4, // m4a en lugar de aacADTS
-      );
+      await _recorder.startRecorder(toFile: ruta, codec: Codec.aacMP4);
 
       setState(() {
         _grabando = true;
@@ -199,7 +262,6 @@ class _ReporteScreenState extends State<ReporteScreen> {
     final tieneInternet = await OfflineService.hayConexion();
 
     if (!tieneInternet) {
-      // Guardar localmente
       await OfflineService.guardarIncidenteLocal(
         vehiculoId: vehiculoSeleccionado!,
         latitud: ubicacion!.latitude,
@@ -221,34 +283,67 @@ class _ReporteScreenState extends State<ReporteScreen> {
     }
 
     // Con internet — enviar normalmente
-    final incidente = await IncidenteService.crearIncidente({
-      'vehiculo_id': vehiculoSeleccionado,
-      'latitud': ubicacion!.latitude,
-      'longitud': ubicacion!.longitude,
-      'descripcion_texto': descripcionCtrl.text.trim(),
-      'tipo_problema': tipoProblema,
-    });
+    try {
+      final incidente = await IncidenteService.crearIncidente({
+        'vehiculo_id': vehiculoSeleccionado,
+        'latitud': ubicacion!.latitude,
+        'longitud': ubicacion!.longitude,
+        'descripcion_texto': descripcionCtrl.text.trim(),
+        'tipo_problema': tipoProblema,
+      });
 
-    if (incidente == null) {
+      if (incidente == null) {
+        // Falló el envío, guardar offline
+        await OfflineService.guardarIncidenteLocal(
+          vehiculoId: vehiculoSeleccionado!,
+          latitud: ubicacion!.latitude,
+          longitud: ubicacion!.longitude,
+          descripcionTexto: descripcionCtrl.text.trim(),
+          tipoProblema: tipoProblema,
+          imagenPath: imagen?.path,
+          audioPath: _rutaAudio,
+        );
+        setState(() {
+          exito = '⚠️ No se pudo conectar. Emergencia guardada localmente.';
+          cargando = false;
+        });
+        await Future.delayed(const Duration(seconds: 3));
+        if (!mounted) return;
+        Navigator.pop(context);
+        return;
+      }
+
+      if (imagen != null)
+        await IncidenteService.subirImagen(incidente['id'], imagen!);
+      if (_rutaAudio != null)
+        await IncidenteService.subirAudio(incidente['id'], _rutaAudio!);
+
       setState(() {
-        error = 'Error al crear el incidente';
+        exito = '✅ Emergencia reportada correctamente';
         cargando = false;
       });
-      return;
+      await Future.delayed(const Duration(seconds: 2));
+      if (!mounted) return;
+      Navigator.pop(context);
+    } catch (e) {
+      // Error inesperado, guardar offline
+      await OfflineService.guardarIncidenteLocal(
+        vehiculoId: vehiculoSeleccionado!,
+        latitud: ubicacion!.latitude,
+        longitud: ubicacion!.longitude,
+        descripcionTexto: descripcionCtrl.text.trim(),
+        tipoProblema: tipoProblema,
+        imagenPath: imagen?.path,
+        audioPath: _rutaAudio,
+      );
+      setState(() {
+        exito = '⚠️ Error de conexión. Emergencia guardada localmente.';
+        cargando = false;
+      });
+      await Future.delayed(const Duration(seconds: 3));
+      if (!mounted) return;
+      Navigator.pop(context);
     }
-
-    if (imagen != null)
-      await IncidenteService.subirImagen(incidente['id'], imagen!);
-    if (_rutaAudio != null)
-      await IncidenteService.subirAudio(incidente['id'], _rutaAudio!);
-
-    setState(() {
-      exito = '✅ Emergencia reportada correctamente';
-      cargando = false;
-    });
-    await Future.delayed(const Duration(seconds: 2));
-    if (!mounted) return;
-    Navigator.pop(context);
   }
 
   @override
@@ -272,6 +367,14 @@ class _ReporteScreenState extends State<ReporteScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            // Banner sin conexión
+            if (_sinConexion)
+              _buildBanner(
+                '⚠️ Modo sin conexión — datos cargados del caché',
+                const Color(0xFFFAEEDA),
+                const Color(0xFFBA7517),
+              ),
+
             // Ubicación y mapa
             _seccion(
               icono: Icons.location_on,
@@ -300,18 +403,22 @@ class _ReporteScreenState extends State<ReporteScreen> {
                       : ubicacion != null
                       ? Row(
                           children: [
-                            const Icon(
+                            Icon(
                               Icons.check_circle,
-                              color: Color(0xFF1D9E75),
+                              color: _ubicacionCacheada
+                                  ? const Color(0xFFBA7517)
+                                  : const Color(0xFF1D9E75),
                               size: 18,
                             ),
                             const SizedBox(width: 8),
                             Expanded(
                               child: Text(
                                 'Lat: ${ubicacion!.latitude.toStringAsFixed(4)}, Lng: ${ubicacion!.longitude.toStringAsFixed(4)}',
-                                style: const TextStyle(
+                                style: TextStyle(
                                   fontSize: 13,
-                                  color: Color(0xFF1D9E75),
+                                  color: _ubicacionCacheada
+                                      ? const Color(0xFFBA7517)
+                                      : const Color(0xFF1D9E75),
                                   fontWeight: FontWeight.w500,
                                 ),
                               ),
@@ -330,6 +437,15 @@ class _ReporteScreenState extends State<ReporteScreen> {
                           icon: const Icon(Icons.refresh),
                           label: const Text('Obtener ubicación'),
                         ),
+
+                  // Aviso ubicación cacheada
+                  if (_ubicacionCacheada)
+                    _buildBanner(
+                      '📍 Usando última ubicación conocida',
+                      const Color(0xFFFAEEDA),
+                      const Color(0xFFBA7517),
+                    ),
+
                   if (ubicacion != null) ...[
                     const SizedBox(height: 12),
                     ClipRRect(
@@ -406,9 +522,11 @@ class _ReporteScreenState extends State<ReporteScreen> {
               icono: Icons.directions_car,
               titulo: 'Vehículo',
               child: vehiculos.isEmpty
-                  ? const Text(
-                      'No tenés vehículos registrados. Registrá uno primero.',
-                      style: TextStyle(fontSize: 13, color: Colors.grey),
+                  ? Text(
+                      _sinConexion
+                          ? 'Sin conexión y sin vehículos en caché. Abrí la app con internet al menos una vez.'
+                          : 'No tenés vehículos registrados. Registrá uno primero.',
+                      style: const TextStyle(fontSize: 13, color: Colors.grey),
                     )
                   : DropdownButtonFormField<String>(
                       value: vehiculoSeleccionado,
@@ -766,6 +884,19 @@ class _ReporteScreenState extends State<ReporteScreen> {
           ],
         ),
       ),
+    );
+  }
+
+  Widget _buildBanner(String mensaje, Color bgColor, Color textColor) {
+    return Container(
+      padding: const EdgeInsets.all(10),
+      margin: const EdgeInsets.only(bottom: 12),
+      decoration: BoxDecoration(
+        color: bgColor,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: textColor.withOpacity(0.4)),
+      ),
+      child: Text(mensaje, style: TextStyle(color: textColor, fontSize: 13)),
     );
   }
 

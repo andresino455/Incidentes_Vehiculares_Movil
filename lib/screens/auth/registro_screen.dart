@@ -15,6 +15,7 @@ class _RegistroScreenState extends State<RegistroScreen> {
   final emailCtrl = TextEditingController();
   final telefonoCtrl = TextEditingController();
   final passwordCtrl = TextEditingController();
+  final codigoTenantCtrl = TextEditingController();
   bool cargando = false;
   String error = '';
   String exito = '';
@@ -25,13 +26,18 @@ class _RegistroScreenState extends State<RegistroScreen> {
       return;
     }
     setState(() { cargando = true; error = ''; });
-    final res = await AuthService.registroUsuario({
+
+    final body = {
       'nombre': nombreCtrl.text.trim(),
       'apellido': apellidoCtrl.text.trim(),
       'email': emailCtrl.text.trim(),
       'telefono': telefonoCtrl.text.trim(),
       'password': passwordCtrl.text,
-    });
+      if (codigoTenantCtrl.text.trim().isNotEmpty)
+        'codigo_tenant': codigoTenantCtrl.text.trim().toUpperCase(),
+    };
+
+    final res = await AuthService.registroUsuario(body);
     if (!mounted) return;
     if (res.containsKey('id')) {
       setState(() { exito = 'Cuenta creada. Iniciá sesión.'; cargando = false; });
@@ -86,6 +92,50 @@ class _RegistroScreenState extends State<RegistroScreen> {
                     _campo('Teléfono', telefonoCtrl, false),
                     const SizedBox(height: 14),
                     _campo('Contraseña *', passwordCtrl, true),
+                    const SizedBox(height: 20),
+
+                    // Sección código de red
+                    const Divider(),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: const [
+                        Icon(Icons.group_outlined, color: Color(0xFF534AB7), size: 18),
+                        SizedBox(width: 8),
+                        Text(
+                          'Red de talleres (opcional)',
+                          style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF444444)),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    const Text(
+                      'Si tenés un código de red, ingresalo para acceder a talleres específicos. Dejalo vacío para usar la red general.',
+                      style: TextStyle(fontSize: 12, color: Colors.grey),
+                    ),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: codigoTenantCtrl,
+                      textCapitalization: TextCapitalization.characters,
+                      decoration: InputDecoration(
+                        hintText: 'Ej: EMPRESA01',
+                        hintStyle: const TextStyle(color: Colors.grey, fontSize: 13),
+                        prefixIcon: const Icon(Icons.vpn_key_outlined, color: Color(0xFF534AB7), size: 20),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: const BorderSide(color: Color(0xFFDDDDDD)),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: const BorderSide(color: Color(0xFFDDDDDD)),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: const BorderSide(color: Color(0xFF534AB7)),
+                        ),
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                      ),
+                    ),
+
                     if (error.isNotEmpty) ...[
                       const SizedBox(height: 12),
                       Container(

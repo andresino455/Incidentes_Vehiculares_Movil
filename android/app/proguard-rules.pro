@@ -1,0 +1,3 @@
+-dontwarn com.stripe.android.pushProvisioning.**
+-dontwarn com.reactnativestripesdk.**
+-keep class com.stripe.android.** { *; }

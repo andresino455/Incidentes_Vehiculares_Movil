@@ -121,6 +121,7 @@ class OfflineService {
     int exitosos = 0;
     int fallidos = 0;
 
+
     for (final inc in pendientes) {
       try {
         final incidente = await IncidenteService.crearIncidente({

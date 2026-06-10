@@ -5,9 +5,13 @@ import 'screens/auth/login_screen.dart';
 import 'screens/home/home_screen.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'services/offline_service.dart';
+import 'package:flutter_stripe/flutter_stripe.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  Stripe.publishableKey = 'pk_test_51TfWmsGp3XudZDNF4i1kg6RAZUgHSE7cCsRRd1gtCnUgpTX9CofhNXAKrA4hxyKPxclClqZdbpzqQ5Yh4O8wSun700hjxAAsm1';
+  await Stripe.instance.applySettings();
+
   await NotificacionService.inicializar();
   // Sincronizar automáticamente cuando vuelve la conexión
   Connectivity().onConnectivityChanged.listen((result) async {

@@ -31,18 +31,22 @@ class IncidenteService {
     return null;
   }
 
-  static Future<Map<String, dynamic>?> crearIncidente(
-    Map<String, dynamic> datos,
-  ) async {
+static Future<Map<String, dynamic>?> crearIncidente(
+  Map<String, dynamic> datos,
+) async {
+  try {
     final res = await http.post(
       Uri.parse('${Config.apiUrl}/incidentes/'),
       headers: await _headers(),
       body: jsonEncode(datos),
-    );
+    ).timeout(const Duration(seconds: 15));
     if (res.statusCode == 201) return jsonDecode(res.body);
     return null;
+  } catch (e) {
+    print('[IncidenteService] Error crearIncidente: $e');
+    return null;
   }
-
+}
   static Future<bool> subirImagen(String incidenteId, File imagen) async {
     final token = await AuthService.getToken();
     final request = http.MultipartRequest(

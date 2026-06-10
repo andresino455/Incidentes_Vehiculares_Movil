@@ -19,6 +19,9 @@ class _SeguimientoScreenState extends State<SeguimientoScreen> {
 
   LatLng? _ubicacionTecnico;
   LatLng? _ubicacionUsuario;
+  double? _distanciaKm;
+  int? _minutosEstimados;
+  final Distance _distanceCalc = const Distance();
 
   @override
   void initState() {
@@ -30,7 +33,6 @@ class _SeguimientoScreenState extends State<SeguimientoScreen> {
   void _inicializar() {
     final inc = widget.incidente;
 
-    // Ubicación del usuario (donde está el incidente)
     if (inc['latitud'] != null && inc['longitud'] != null) {
       _ubicacionUsuario = LatLng(
         double.parse(inc['latitud'].toString()),
@@ -38,7 +40,6 @@ class _SeguimientoScreenState extends State<SeguimientoScreen> {
       );
     }
 
-    // Ubicación inicial del técnico si existe
     final tecnico = inc['tecnico'];
     if (tecnico != null &&
         tecnico['latitud_actual'] != null &&
@@ -48,6 +49,8 @@ class _SeguimientoScreenState extends State<SeguimientoScreen> {
         double.parse(tecnico['longitud_actual'].toString()),
       );
     }
+
+    _calcularTiempoEstimado();
   }
 
   void _escucharUbicacion() {
@@ -59,11 +62,25 @@ class _SeguimientoScreenState extends State<SeguimientoScreen> {
             double.parse(msg['longitud'].toString()),
           );
         });
-        // Mover el mapa para mostrar ambos puntos
+        _calcularTiempoEstimado();
         if (_ubicacionTecnico != null) {
           _mapController.move(_ubicacionTecnico!, 14);
         }
       }
+    });
+  }
+
+  void _calcularTiempoEstimado() {
+    if (_ubicacionTecnico == null || _ubicacionUsuario == null) return;
+    final metros = _distanceCalc.as(
+      LengthUnit.Meter,
+      _ubicacionTecnico!,
+      _ubicacionUsuario!,
+    );
+    setState(() {
+      _distanciaKm = metros / 1000;
+      // Velocidad promedio en ciudad: 30 km/h
+      _minutosEstimados = ((_distanciaKm! / 30) * 60).ceil();
     });
   }
 
@@ -82,8 +99,10 @@ class _SeguimientoScreenState extends State<SeguimientoScreen> {
       appBar: AppBar(
         backgroundColor: Colors.white,
         elevation: 0,
-        title: const Text('Técnico en camino',
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+        title: const Text(
+          'Técnico en camino',
+          style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+        ),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_ios, color: Color(0xFF534AB7)),
           onPressed: () => Navigator.pop(context),
@@ -91,7 +110,6 @@ class _SeguimientoScreenState extends State<SeguimientoScreen> {
       ),
       body: Column(
         children: [
-
           // Info del técnico
           if (tecnico != null)
             Container(
@@ -100,7 +118,8 @@ class _SeguimientoScreenState extends State<SeguimientoScreen> {
               child: Row(
                 children: [
                   Container(
-                    width: 44, height: 44,
+                    width: 44,
+                    height: 44,
                     decoration: const BoxDecoration(
                       color: Color(0xFFEEEDFE),
                       shape: BoxShape.circle,
@@ -109,8 +128,9 @@ class _SeguimientoScreenState extends State<SeguimientoScreen> {
                       child: Text(
                         '${tecnico['nombre'][0]}${tecnico['apellido'][0]}',
                         style: const TextStyle(
-                            color: Color(0xFF534AB7),
-                            fontWeight: FontWeight.w600),
+                          color: Color(0xFF534AB7),
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
                     ),
                   ),
@@ -122,18 +142,26 @@ class _SeguimientoScreenState extends State<SeguimientoScreen> {
                         Text(
                           '${tecnico['nombre']} ${tecnico['apellido']}',
                           style: const TextStyle(
-                              fontWeight: FontWeight.w600, fontSize: 15),
+                            fontWeight: FontWeight.w600,
+                            fontSize: 15,
+                          ),
                         ),
                         if (tecnico['telefono'] != null)
-                          Text(tecnico['telefono'],
-                              style: const TextStyle(
-                                  color: Colors.grey, fontSize: 12)),
+                          Text(
+                            tecnico['telefono'],
+                            style: const TextStyle(
+                              color: Colors.grey,
+                              fontSize: 12,
+                            ),
+                          ),
                       ],
                     ),
                   ),
                   Container(
                     padding: const EdgeInsets.symmetric(
-                        horizontal: 10, vertical: 5),
+                      horizontal: 10,
+                      vertical: 5,
+                    ),
                     decoration: BoxDecoration(
                       color: const Color(0xFFEEEDFE),
                       borderRadius: BorderRadius.circular(20),
@@ -141,17 +169,22 @@ class _SeguimientoScreenState extends State<SeguimientoScreen> {
                     child: const Row(
                       children: [
                         SizedBox(
-                          width: 8, height: 8,
+                          width: 8,
+                          height: 8,
                           child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: Color(0xFF534AB7)),
+                            strokeWidth: 2,
+                            color: Color(0xFF534AB7),
+                          ),
                         ),
                         SizedBox(width: 6),
-                        Text('En camino',
-                            style: TextStyle(
-                                color: Color(0xFF534AB7),
-                                fontSize: 12,
-                                fontWeight: FontWeight.w500)),
+                        Text(
+                          'En camino',
+                          style: TextStyle(
+                            color: Color(0xFF534AB7),
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
                       ],
                     ),
                   ),
@@ -163,8 +196,11 @@ class _SeguimientoScreenState extends State<SeguimientoScreen> {
           Expanded(
             child: _ubicacionUsuario == null
                 ? const Center(
-                    child: Text('Cargando mapa...',
-                        style: TextStyle(color: Colors.grey)))
+                    child: Text(
+                      'Cargando mapa...',
+                      style: TextStyle(color: Colors.grey),
+                    ),
+                  )
                 : FlutterMap(
                     mapController: _mapController,
                     options: MapOptions(
@@ -182,11 +218,15 @@ class _SeguimientoScreenState extends State<SeguimientoScreen> {
                           // Marcador del usuario
                           Marker(
                             point: _ubicacionUsuario!,
-                            width: 50, height: 50,
+                            width: 50,
+                            height: 50,
                             child: const Column(
                               children: [
-                                Icon(Icons.location_pin,
-                                    color: Color(0xFFD85A30), size: 40),
+                                Icon(
+                                  Icons.location_pin,
+                                  color: Color(0xFFD85A30),
+                                  size: 40,
+                                ),
                               ],
                             ),
                           ),
@@ -194,11 +234,15 @@ class _SeguimientoScreenState extends State<SeguimientoScreen> {
                           if (_ubicacionTecnico != null)
                             Marker(
                               point: _ubicacionTecnico!,
-                              width: 50, height: 50,
+                              width: 50,
+                              height: 50,
                               child: const Column(
                                 children: [
-                                  Icon(Icons.engineering,
-                                      color: Color(0xFF534AB7), size: 36),
+                                  Icon(
+                                    Icons.engineering,
+                                    color: Color(0xFF534AB7),
+                                    size: 36,
+                                  ),
                                 ],
                               ),
                             ),
@@ -209,11 +253,9 @@ class _SeguimientoScreenState extends State<SeguimientoScreen> {
                         PolylineLayer(
                           polylines: [
                             Polyline(
-                              points: [
-                                _ubicacionTecnico!,
-                                _ubicacionUsuario!
-                              ],
-                              color: const Color(0xFF534AB7).withOpacity(0.5),
+                              points: [_ubicacionTecnico!, _ubicacionUsuario!],
+                              color:
+                                  const Color(0xFF534AB7).withOpacity(0.5),
                               strokeWidth: 3,
                               isDotted: true,
                             ),
@@ -223,17 +265,63 @@ class _SeguimientoScreenState extends State<SeguimientoScreen> {
                   ),
           ),
 
-          // Leyenda
+          // Tiempo estimado + leyenda
           Container(
             padding: const EdgeInsets.all(16),
             color: Colors.white,
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceAround,
+            child: Column(
               children: [
-                _leyendaItem(
-                    Icons.location_pin, const Color(0xFFD85A30), 'Tu ubicación'),
-                _leyendaItem(
-                    Icons.engineering, const Color(0xFF534AB7), 'Técnico'),
+                // Tiempo estimado
+                if (_minutosEstimados != null)
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(
+                      vertical: 10,
+                      horizontal: 16,
+                    ),
+                    margin: const EdgeInsets.only(bottom: 12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFEEEDFE),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Icon(
+                          Icons.access_time,
+                          color: Color(0xFF534AB7),
+                          size: 18,
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          _minutosEstimados! <= 1
+                              ? 'El técnico está llegando'
+                              : 'Tiempo estimado: $_minutosEstimados min  ·  ${_distanciaKm!.toStringAsFixed(1)} km',
+                          style: const TextStyle(
+                            color: Color(0xFF534AB7),
+                            fontWeight: FontWeight.w600,
+                            fontSize: 14,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                // Leyenda
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceAround,
+                  children: [
+                    _leyendaItem(
+                      Icons.location_pin,
+                      const Color(0xFFD85A30),
+                      'Tu ubicación',
+                    ),
+                    _leyendaItem(
+                      Icons.engineering,
+                      const Color(0xFF534AB7),
+                      'Técnico',
+                    ),
+                  ],
+                ),
               ],
             ),
           ),
